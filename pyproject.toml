@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "uncertainty-quantification"
+version = "0.1.0"
+description = "Uncertainty quantification with various machine learning methods"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "catboost",
+    "lightgbm",
+    "optuna",
+    "pandas",
+    "pytest",
+    "pyyaml",
+    "requests",
+    "scikit-learn",
+    "xgboost",
+]
