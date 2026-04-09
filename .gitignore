@@ -12,3 +12,4 @@ wheels/
 # Etc
 .pytest_cache
 results
+data/
