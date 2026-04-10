@@ -13,3 +13,4 @@ wheels/
 .pytest_cache
 results
 data/
+catboost_info/
