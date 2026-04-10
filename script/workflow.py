@@ -89,6 +89,11 @@ def main():
         help="Number of virtual ensembles (CatBoost only)",
     )
     parser.add_argument(
+        "--save_model",
+        action="store_true",
+        help="Save trained models",
+    )
+    parser.add_argument(
         "--output-dir",
         type=str,
         default="results",
@@ -196,7 +201,8 @@ def main():
                 f"{dataset_name}_{method}_seed{args.random_seed}.joblib"
             )
             model_path = os.path.join(args.output_dir, model_filename)
-            output["pipeline"] = pipeline
+            if args.save_model:
+                output["pipeline"] = pipeline
 
             logger.info("Calculating raw predictions")
             preds = pipeline.predict(X_test)
