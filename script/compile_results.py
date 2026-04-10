@@ -11,16 +11,15 @@ if __name__ == "__main__":
 
     for result in tqdm(list(results_path.rglob("*joblib"))):
         file_name = result.name
-        approach = result.parent.name.split("-")
-        if approach[1] == "calibration":
-            calibration = True
-            nfolds = int(approach[2])
-            seed = int(approach[3])
-        else:
+        approach_and_calibration, nfolds, seed = result.parent.name.split(".")
+        if "nocalibration" in approach_and_calibration:
             calibration = False
-            nfolds = int(approach[1])
-            seed = int(approach[2])
-        approach = approach[0]
+            approach = approach_and_calibration.replace("-nocalibration", "")
+        else:
+            calibration = True
+            approach = approach_and_calibration.replace("-calibration", "")
+        nfolds = None if nfolds == "NA" else int(nfolds)
+        seed = int(seed)
 
         dataset, model, seed = file_name.replace(".joblib", "").split("_")
 
