@@ -100,6 +100,9 @@ class CustomPipeline:
         base_estimator = self._get_estimator()
 
         if self.cv_ensemble:
+            logger.info(
+                f"Using CV ensemble with {self.cv_ensemble_splits} splits"
+            )
             if self.task == "classification":
                 base_estimator = CVEnsembleClassifier(
                     base_estimator,
@@ -262,7 +265,7 @@ class CustomPipeline:
             if self.task == "classification":
                 base_estimator = CVEnsembleClassifier(
                     base_estimator,
-                    n_splits=5,
+                    n_splits=self.cv_ensemble_splits,
                     output_format=self.ensemble_output_format,
                     proba_output_format="mean",
                     random_state=self.seed,
@@ -270,7 +273,7 @@ class CustomPipeline:
             else:
                 base_estimator = CVEnsembleRegressor(
                     base_estimator,
-                    n_splits=5,
+                    n_splits=self.cv_ensemble_splits,
                     output_format=self.ensemble_output_format,
                     random_state=self.seed,
                 )
