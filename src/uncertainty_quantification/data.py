@@ -1,8 +1,9 @@
 import os
 import requests
 import yaml
-from typing import Dict, Any, List
 import pandas as pd
+from pathlib import Path
+from typing import Dict, Any, List
 from .logger import get_logger
 
 logger = get_logger("uncertainty_quantification")
@@ -49,13 +50,14 @@ class DataCatalog:
 
 def download_if_unavailable(path: str, url: str):
     if not os.path.exists(path):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
         try:
             response = requests.get(url)
             response.raise_for_status()
             with open(path, "wb") as f:
                 f.write(response.content)
         except Exception as e:
-            logger.error(f"Failed to download dataset {dataset_name}: {e}")
+            logger.error(f"Failed to download {path}: {e}")
             raise
 
 
