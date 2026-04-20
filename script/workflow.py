@@ -89,6 +89,12 @@ def main():
         help="Number of virtual ensembles (CatBoost only)",
     )
     parser.add_argument(
+        "--n_jobs",
+        type=int,
+        default=1,
+        help="Number of jobs for parallel processing",
+    )
+    parser.add_argument(
         "--save_model",
         action="store_true",
         help="Save trained models",
@@ -190,6 +196,7 @@ def main():
                 n_features=args.n_features,
                 optimize_hyperparameters=args.optimize,
                 virtual_ensembles_count=vec,
+                n_jobs=args.n_jobs,
                 seed=args.random_seed,
             )
 
