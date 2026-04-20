@@ -5,6 +5,7 @@ from scipy.stats import mode
 from sklearn.pipeline import Pipeline
 from sklearn.feature_selection import SelectKBest, f_classif, f_regression
 from sklearn.calibration import CalibratedClassifierCV
+from sklearn.model_selection import StratifiedKFold, KFold
 from sklearn.model_selection import cross_val_score
 
 from catboost import CatBoostClassifier, CatBoostRegressor
@@ -62,6 +63,8 @@ class CustomPipeline:
         optimize_hyperparameters: bool = False,
         virtual_ensembles_count: Optional[int] = None,
         ensemble_output_format: str = "raw",
+        n_trials: int = 50,
+        n_jobs: int = 1,
         seed: int = 42,
     ):
         self.task = task
@@ -75,6 +78,8 @@ class CustomPipeline:
         self.optimize_hyperparameters = optimize_hyperparameters
         self.virtual_ensembles_count = virtual_ensembles_count
         self.ensemble_output_format = ensemble_output_format
+        self.n_trials = n_trials
+        self.n_jobs = n_jobs
         self.seed = seed
 
         self.pipeline = None
@@ -120,8 +125,6 @@ class CustomPipeline:
                 )
 
         if self.calibration and self.task == "classification":
-            from sklearn.model_selection import StratifiedKFold
-
             cv = StratifiedKFold(
                 n_splits=3, shuffle=True, random_state=self.seed
             )
@@ -216,7 +219,7 @@ class CustomPipeline:
                     "learning_rate", 1e-3, 0.5, log=True
                 )
             elif self.method == "catboost":
-                params["iterations"] = trial.suggest_int("iterations", 50, 150)
+                params["iterations"] = trial.suggest_int("iterations", 50, 200)
                 params["learning_rate"] = trial.suggest_float(
                     "learning_rate", 1e-3, 0.5, log=True
                 )
@@ -226,9 +229,6 @@ class CustomPipeline:
             )
             selector = SelectKBest(score_func=score_func, k=n_features)
 
-            # The inner optimization loop just optimizes the base model
-            # This is important so we are optimizing the model itself correctly
-            # before applying CV/Calibration wrappers
             estimator = self._get_estimator(**params)
 
             pipe = Pipeline(
@@ -236,8 +236,6 @@ class CustomPipeline:
             )
 
             metric = "accuracy" if self.task == "classification" else "r2"
-
-            from sklearn.model_selection import StratifiedKFold, KFold
 
             if self.task == "classification":
                 cv = StratifiedKFold(
@@ -251,7 +249,7 @@ class CustomPipeline:
 
         sampler = optuna.samplers.TPESampler(seed=self.seed)
         study = optuna.create_study(direction="maximize", sampler=sampler)
-        study.optimize(objective, n_trials=5, show_progress_bar=False)
+        study.optimize(objective, n_trials=self.n_trials, n_jobs=self.n_jobs)
 
         best_params = study.best_params
         best_n_features = best_params.pop("n_features")
@@ -279,8 +277,6 @@ class CustomPipeline:
                 )
 
         if self.calibration and self.task == "classification":
-            from sklearn.model_selection import StratifiedKFold
-
             cv = StratifiedKFold(
                 n_splits=3, shuffle=True, random_state=self.seed
             )
