@@ -163,7 +163,7 @@ class CustomPipeline:
             params = {"random_state": self.seed, **hyperparams}
             if self.task == "classification":
                 return XGBClassifier(
-                    use_label_encoder=False, eval_metric="logloss", **params
+                    eval_metric="logloss", **params
                 )
             return XGBRegressor(**params)
 
