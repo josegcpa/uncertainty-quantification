@@ -1,6 +1,6 @@
 set -e
 
-SAME="--datasets all --virtual-ensembles-count 25 --optimize --n_jobs 16"
+SAME="--datasets all --virtual-ensembles-count 25 --optimize"
 
 RESULTS_DIR=results
 
