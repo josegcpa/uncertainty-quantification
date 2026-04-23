@@ -1,0 +1,548 @@
+---
+title: "Uncertainty-based prediction deferral in radiomics models: a large-scale reproducible analysis with multiple open datasets"
+authors:
+  - José Guilherme de Almeida
+  - Nickolas Papanikolaou
+format: html
+editor: visual
+---
+
+# Abstract
+
+Here, we trained CatBoost models for all datasets in [radMLBench](https://pubmed.ncbi.nlm.nih.gov/39270457/), a publicly available dataset of pre-computed radiomic features with clinically relevant targets. We filtered results to consider only datasets with > 100 samples, yielding a total of 29 datasets (out of the original 50). For all models, we perform hyperparameter optimisation using [Optuna](https://optuna.org/) for the number of estimators (between 50 and 150) and the learning rate (between $10^{-3}$ and $0.5$), and calibrate each classifier individually using isotonic calibration with k-fold cross-validation (CV; k=3). We then test how different methods for uncertainty-based prediction deferral (when models defer the result to a human reader): k-fold CV ensembles and virtual ensembles (VE; a CatBoost-specific technique which uses additive tree subsets to produce an ensemble of models). We test four different training regimes: with posterior sampling (a method which, in theory, provides better VE estimates) and k=3, k=5 and k=10 for CV ensembles. We repeat all experiments 10 times with different seeds, noting that for each, each dataset was divided into training (80%) and testing (20%) data.
+
+We analyse the results using mixed effects linear models such that $\mathrm{AUC} \sim \mathrm{Approach} + (1 | \mathrm{dataset}) + (1 | \mathrm{dataset \times seed})$, where $\mathrm{AUC}$ is the area under the receiver operating curve, $\mathrm{Approach} \in \{\mathrm{Baseline}, \mathrm{CV(k=3)}, \mathrm{CV(k=5)}, \mathrm{CV(k=10)}, \mathrm{Posterior\ sampling} \}$, and $\mathrm{dataset}$ and $\mathrm{seed}$ refer to each dataset and the random seed, respectively. The interaction term aims to measure possible, differences associated with a data splitting. As sensitivity analyses, we compare the CV ensemble results to those obtained using other tree-based methods (random forests, LightGBM and XGBoost)
+
+The main results of this analyses are as follows (here, performance is used interchangeably with AUC):
+
+1. **Similar performance in CatBoost mmodels:** methods perform similarly when doing no deferral. The sole exception is that training with _posterior sampling_ leads to a drop in performance
+2. **CV ensembles (CVE) lead to performance improvements, virtual ensembles (VE) _on their own_ don't:** whereas we see systematic increases in performance when performing deferral with CV ensembles, such is not the case when _only_ virtual ensembles are used. This implies that the theoretical effect of simulating model ensembles achieved through virtual ensembles is not sufficiently good to estimate uncertainty for an uncertainty-based deferral mechanism. Combining both CVE with VE does not improve on the performance observed for CVE alone
+3. **Sensitivity analyses show that CatBoost outperforms other models:** while performance improvements are systematically observed when deferring with CV ensembles, performance is systematically lower for other models when compared with CatBoost, both with and without deferral.
+
+The expected improvement when compared with the baseline: is ~0.01 for CVE (p=0.006) and no improvement for VE (p>0.05). The results for this are in @sec-compare-with-baseline.
+
+# Setup
+
+```{r}
+library(tidyverse)
+library(pROC)
+library(ggsignif)
+library(lme4)
+library(lmerTest)
+library(patchwork)
+library(emmeans)
+library(knitr)
+library(kableExtra)
+
+approach_palette <- RColorBrewer::brewer.pal(5, "Set1")
+names(approach_palette) <- c(
+  "Baseline", 
+  "CV ensemble (k=3)", 
+  "CV ensemble (k=5)", 
+  "CV ensemble (k=10)",
+  "Posterior sampling" 
+)
+
+format_pval <- function(x, prefix_p=FALSE) {
+  out <- format.pval(x, eps = 1e-4, digits = 1, scientific = F) %>%
+    gsub(pattern = "=<", replacement = "<")
+  if (prefix_p) {
+    out <- ifelse(
+      grepl("<", out),
+      sprintf("p %s",out),
+      sprintf("p = %s",out)
+    )
+  }
+  return(out)
+}
+
+auc_var_hanley_mcneill <- function(x) {
+  a <- x$auc
+  n1 <- length(x$cases)
+  n2 <- length(x$controls)
+  q1 <- a / (2 - a)
+  q2 <- (2 * (a ^ 2)) / (1 + a)
+  n <- a * (1 - a) + (n1 - 1) * (q1 - a ^ 2) + (n2 - 1) * (q2 - a ^ 2)
+  d <- n1 * n2
+  return(n / d)
+}
+
+theme_classic_2 <- function(base_size = 11,
+                            base_family = "",
+                            base_line_size = 11/22,
+                            base_rect_size = 11/22) {
+  theme_classic(base_size = base_size,
+                base_family = base_family,
+                base_line_size = base_line_size,
+                base_rect_size = base_rect_size) %>%
+    theme(axis.text = element_text(size = base_size,
+                                   colour = "black"),
+          axis.title = element_text(size = base_size),
+          strip.background = element_blank(),
+          strip.text = element_text(size = base_size,
+                                    face = "bold",
+                                    hjust = 0.0,
+                                    margin = margin(b = 2)),
+          legend.title = element_text(size = base_size, face = "bold"),
+          panel.background = element_blank(),
+          legend.text = element_text(size = base_size),
+          axis.line = element_line(),
+          axis.ticks = element_line(),
+          panel.grid = element_blank(),
+          plot.title = element_text(size = base_size, face = "bold")) %>%
+    return
+}
+```
+
+# Data loading and processing
+
+```{r}
+df <- read_csv("data/results.csv") %>%
+  mutate(idx = seq(1, length(y_test))) %>%
+  mutate(virtual_contains_0.5 = virtual_min < 0.5 & virtual_max > 0.5,
+         cve_contains_0.5 = proba_min < 0.5 & proba_max > 0.5) %>%
+  mutate(virtual_contains_0.5 = ifelse(is.na(virtual_contains_0.5), F, virtual_contains_0.5),
+         cve_contains_0.5 = ifelse(is.na(cve_contains_0.5), F, cve_contains_0.5)) %>%
+  group_by(approach, model, dataset, seed, nfolds, calibration) %>%
+  mutate(N = length(unique(idx)) * 4,
+         N_testing = length(unique(idx))) %>%
+  ungroup() %>%
+  mutate(
+    Calibration = calibration,
+    Approach = case_when(
+      grepl("baseline", approach) ~ "Baseline",
+      grepl("cvensemble", approach) ~ "CV ensemble",
+      grepl("posteriorsampling", approach) ~ "Posterior sampling"
+    ),
+    Approach = ifelse(
+      Approach == "CV ensemble",
+      sprintf("CV ensemble (k=%s)", nfolds),
+      Approach
+    ),
+    Approach = factor(
+      Approach,
+      levels = names(approach_palette)
+    )
+  )
+
+roc_df <- df %>% 
+  subset(N > 100) %>%
+  group_by(Approach, Calibration, model, dataset, seed, N, N_testing, nfolds) %>%
+  summarise(
+    roc_baseline = list(roc(y_test, proba_preds, direction = "<", levels = c(0, 1))),
+    roc_ve = list(roc(y_test[!virtual_contains_0.5], proba_preds[!virtual_contains_0.5], 
+                      direction = "<", levels = c(0, 1))),
+    roc_cve = list(roc(y_test[!cve_contains_0.5], proba_preds[!cve_contains_0.5], 
+                       direction = "<", levels = c(0, 1))),
+    excluded_virtual = sum(virtual_contains_0.5),
+    excluded_cve = sum(cve_contains_0.5),
+    .groups = "drop"
+  ) 
+auc_df <- roc_df %>%
+  rowwise() %>%
+  mutate(
+    auc_baseline = as.numeric(roc_baseline$auc),
+    auc_se_baseline = sqrt(auc_var_hanley_mcneill(roc_baseline)),
+    auc_ve = as.numeric(roc_ve$auc),
+    auc_se_ve = sqrt(auc_var_hanley_mcneill(roc_ve)),
+    auc_cve = as.numeric(roc_cve$auc),
+    auc_se_cve = sqrt(auc_var_hanley_mcneill(roc_cve)),
+    .groups = "drop") %>%
+  mutate(auc_cve = ifelse(grepl("CV ensemble", Approach), auc_cve, NA)) %>%
+  mutate(diff_ve = auc_ve - auc_baseline,
+         diff_cve = auc_cve - auc_baseline) %>%
+  select(-roc_baseline, -roc_ve, -roc_cve)
+```
+
+# Visualization
+
+```{r}
+#| fig.height: 6
+#| fig.width: 7
+exclusion_dataset_plot <- auc_df %>%
+  subset(model == "catboost" & Calibration == T) %>%
+  ungroup() %>%
+  select(dataset, N, seed, excluded_virtual, excluded_cve) %>%
+  distinct() %>%
+  gather(key = "key", value = "value", excluded_virtual, excluded_cve) %>%
+  mutate(value = value / N) %>%
+  mutate(key = ifelse(key == "excluded_cve", "CV ensembles", "Virtual ensembles")) %>%
+  group_by(dataset, N, key) %>%
+  summarise(
+    value_sd = sd(value),
+    value_se = value_sd / sqrt(length(value)),
+    value = mean(value)
+  ) %>%
+  ggplot(aes(x = value, y = reorder(dataset,N), fill = key, 
+             xmin = value - value_se, xmax = value + value_se)) + 
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_linerange(position = position_dodge(width = 0.9)) +
+  scale_fill_brewer(name = "Exclusion based on...", palette = "Set1") +
+  coord_cartesian(expand = F) + 
+  theme_classic_2(base_size = 8) +
+  xlab("% excluded") +
+  ylab("Dataset") + 
+  theme(legend.position = "bottom",
+        legend.direction = "vertical") + 
+  scale_x_continuous(labels = function(x) sprintf("%.1f%%", x * 100)) 
+
+dataset_auc_plot <- auc_df %>%
+  subset(model %in% c("catboost") & Calibration == T) %>%
+  ggplot(aes(x = auc_value,
+             y = reorder(sprintf("%s (n=%s)", dataset, N), N), 
+             fill = Approach,
+             group = Approach)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme_classic_2(base_size = 8) + 
+  xlab("AUC") +
+  ylab("Dataset (>100 samples total)") +
+  scale_x_continuous(expand = c(0, 0, 0.01, 0.01)) +
+  scale_fill_brewer(palette = "Set2") + 
+  theme(legend.position = "bottom",
+        legend.direction = "vertical")
+
+dataset_auc_diffs_ve_plot <- auc_df %>%
+  subset(model %in% c("catboost") & Calibration == T) %>%
+  ggplot(aes(y = reorder(sprintf("%s (n=%s)", dataset, N), N), 
+             colour = Approach,
+             group = Approach)) +
+  geom_vline(xintercept = 0) +
+  stat_summary(
+    aes(x = diff_ve),
+    position = position_dodge(width = 0.5),
+    size = 0.25) +
+  theme_classic_2(base_size = 8) + 
+  xlab("AUC difference") +
+  ylab("Dataset (>100 samples total)") +
+  scale_x_continuous(expand = c(0, 0, 0.01, 0.01)) +
+  scale_colour_manual(values = approach_palette) + 
+  theme(legend.position = "bottom", legend.direction = "vertical") +
+  guides(color = guide_legend(ncol = 2)) +
+  ggtitle("Virtual ensemble exclusion") 
+
+dataset_auc_diffs_cve_plot <- auc_df %>%
+  subset(model %in% c("catboost") & Calibration == T) %>%
+  ggplot(aes(y = reorder(sprintf("%s (n=%s)", dataset, N), N), 
+             colour = Approach,
+             group = Approach)) +
+  geom_vline(xintercept = 0) +
+  stat_summary(
+    aes(x = diff_cve),
+    position = position_dodge(width = 0.5),
+    size = 0.25) +
+  theme_classic_2(base_size = 8) + 
+  xlab("AUC difference") +
+  ylab("Dataset (>100 samples total)") +
+  scale_x_continuous(expand = c(0, 0, 0.01, 0.01)) +
+  scale_colour_manual(values = approach_palette) + 
+  theme(legend.position = "none") +
+  ggtitle("CV ensemble exclusion")
+
+no_axis_text_y <- theme(axis.text.y = element_blank(),
+                        axis.title.y = element_blank())
+
+dataset_auc_diffs_ve_plot | 
+  (dataset_auc_diffs_cve_plot + no_axis_text_y) |
+  (exclusion_dataset_plot + no_axis_text_y) 
+```
+
+```{r}
+#| fig.height: 1.5
+#| fig.width: 6
+approach_auc_diffs_plot <- auc_df %>%
+  subset(model %in% c("catboost") & Calibration == T) %>%
+  select(-auc_baseline, -auc_se_baseline, 
+         -auc_ve, -auc_se_ve, 
+         -auc_cve, -auc_se_cve, 
+         -excluded_virtual, -excluded_cve) %>%
+  gather(key = "key", value = "value", diff_ve, diff_cve) %>%
+  mutate(key = c(diff_ve = "virtual ensembles", diff_cve = "CV ensembles")[key]) %>%
+  filter(!is.na(value)) %>%
+  ggplot(aes(y = Approach, 
+             colour = Approach,
+             group = key)) +
+  stat_summary(
+    aes(x = value, shape = key),
+    position = position_dodge(width = 0.5),
+    size = 0.25) +
+  geom_vline(xintercept = 0) +
+  theme_classic_2(base_size = 8) + 
+  xlab("AUC difference") +
+  ylab("Dataset (>100 samples total)") +
+  scale_x_continuous(expand = c(0, 0, 0.01, 0.01)) +
+  scale_colour_manual(values = approach_palette) + 
+  guides(color = guide_none()) + 
+  scale_shape_manual(values = c(1, 2), name = "Exclusion based on...")
+
+approach_auc_diffs_plot
+```
+
+# Formal analysis
+
+## Differences in performance between training regimes
+
+```{r}
+auc_df_subset <- filter(auc_df, model == "catboost", Calibration) %>%
+  mutate(weights = 1 / auc_se_baseline ^ 2)
+
+auc_model <- lmer(
+  auc_baseline ~ Approach + (1 | dataset:seed) + (1 | dataset), 
+  data = auc_df_subset,
+  weights = auc_df_subset$weights
+)
+
+summary(auc_model)
+
+emm_auc <- emmeans(auc_model, specs = c("Approach"))
+
+pairs_auc <- pairs(emm_auc)
+
+data.frame(pairs_auc) %>%
+  select(Contrast = contrast, `Difference estimate` = estimate, SE, `p-value` = p.value) %>%
+  kable(digits = 3) %>%
+  kable_styling()
+```
+
+## Differences in performance between sample exclusion methods
+
+```{r}
+auc_df_subset <- filter(auc_df, model == "catboost", Calibration) %>%
+  mutate(
+    se_total_ve = sqrt(auc_se_baseline ^ 2 + auc_se_ve ^ 2),
+    se_total_cve = sqrt(auc_se_baseline ^ 2 + auc_se_cve ^ 2),
+    weights_ve = 1 / se_total_ve ^ 2,
+    weights_cve = 1 / se_total_cve ^ 2
+  )
+
+ve_model <- lmer(
+  diff_ve ~ Approach + (1 | dataset:seed) + (1 | dataset), 
+  data = auc_df_subset,
+  weights = auc_df_subset$weights_ve
+)
+cve_model <- lmer(
+  diff_cve ~ Approach + (1 | dataset:seed) + (1 | dataset), 
+  data = auc_df_subset,
+  weights = auc_df_subset$weights_cve
+)
+
+summary(ve_model)
+summary(cve_model)
+
+emm_ve <- emmeans(ve_model, specs = c("Approach"))
+emm_cve <- emmeans(cve_model, specs = c("Approach"))
+
+pairs_ve <- pairs(emm_ve)
+pairs_cve <- pairs(emm_cve)
+```
+
+### Visualization
+
+```{r}
+#| fig.height: 1.5
+#| fig.width: 5.5
+plot_data <- data.frame(pairs_ve) %>%
+  mutate(contrast1 = str_match(contrast, ".*(?= - )"),
+         contrast2 = str_match(contrast, "(?<= - ).*")) %>%
+  subset(contrast1 == "Baseline") %>%
+  mutate(contrast1 = factor(contrast1, names(approach_palette)),
+         contrast2 = factor(contrast2, names(approach_palette)))
+
+rect_coords <- plot_data %>%
+  subset(p.value < 0.05) %>%
+  summarise(xmin = min(-estimate - SE), 
+            ymin = min(as.numeric(contrast2)) - 1,
+            xmax = max(-estimate + SE), 
+            ymax = max(as.numeric(contrast2)) - 1)
+
+pairs_ve_plot <- plot_data %>%
+  ggplot(aes(y = contrast2, 
+             x = -estimate, 
+             xmin = -estimate - SE, 
+             xmax = -estimate + SE,
+             colour = contrast2)) + 
+  geom_point() +
+  geom_vline(xintercept = 0) +
+  geom_text(aes(label = format_pval(p.value, T)), colour = "black",
+            size = 2.5, vjust = -1) +
+  geom_linerange() +
+  annotate(geom = "rect",
+           xmin = rect_coords$xmin - 0.001, 
+           xmax = rect_coords$xmax + 0.001, 
+           ymin = rect_coords$ymin - 0.25, 
+           ymax = rect_coords$ymax + 0.75,
+           fill = NA,
+           colour = "black") +
+  annotate(
+    geom = "text",
+    x = rect_coords$xmin - 0.001,
+    y = rect_coords$ymax + 0.75,
+    label = "Stat. identical, better than Posterior sampling",
+    vjust = -0.4,
+    hjust = 0,
+    size = 2.5
+  ) + 
+  theme_classic_2(base_size = 8) +
+  theme(legend.position = "none") +
+  xlab("AUC difference vs. virtual ensembles baseline") +
+  ylab("Approach") + 
+  scale_color_manual(values = approach_palette)
+
+pairs_ve_plot
+```
+
+```{r}
+data.frame(pairs_cve) %>%
+  select(Contrast = contrast, `Difference estimate` = estimate, SE, `p-value` = p.value) %>%
+  kable(digits = 6) %>%
+  kable_styling()
+```
+
+## Comparison of post-deferral with baseline performance {#sec-compare-with-baseline}
+
+```{r}
+auc_df_subset <- filter(auc_df, model == "catboost", Calibration) %>%
+  mutate(
+    se_total_ve = sqrt(auc_se_baseline ^ 2 + auc_se_ve ^ 2),
+    se_total_cve = sqrt(auc_se_baseline ^ 2 + auc_se_cve ^ 2),
+    weights_ve = 1 / se_total_ve ^ 2,
+    weights_cve = 1 / se_total_cve ^ 2
+  ) 
+auc_df_baseline <- auc_df_subset %>%
+  subset(Approach == "Baseline") %>%
+  select(dataset, seed, auc_baseline = auc_baseline)
+auc_df_others <- auc_df_subset %>%
+  select(dataset, seed, 
+         Approach,
+         auc_ve = auc_ve,
+         weights_ve = weights_ve,
+         auc_cve = auc_cve,
+         weights_cve = weights_ve)
+
+auc_comparisons <- merge(auc_df_baseline, auc_df_others, by = c("dataset", "seed")) %>%
+  mutate(diff_ve = auc_ve - auc_baseline,
+         diff_cve = auc_cve - auc_baseline)
+
+ve_model <- lmer(
+  diff_ve ~ Approach + (1 | dataset:seed) + (1 | dataset), 
+  data = auc_comparisons,
+  weights = auc_comparisons$weights_ve
+)
+cve_model <- lmer(
+  diff_cve ~ Approach + (1 | dataset:seed) + (1 | dataset), 
+  data = auc_comparisons,
+  weights = auc_comparisons$weights_cve
+)
+
+summary(ve_model)$coefficients %>%
+  kable(digits = 5) %>%
+  kable_styling()
+
+summary(cve_model)$coefficients %>%
+  kable(digits = 5) %>%
+  kable_styling()
+```
+
+## Comparison with other models
+
+### General AUC
+
+```{r}
+auc_df_subset <- filter(
+  auc_df, 
+  Calibration, Approach != "Posterior sampling") %>%
+  mutate(weights = 1 / auc_se_baseline ^ 2)
+
+auc_model <- lmer(
+  auc_baseline ~ Approach + model + (1 | dataset:seed) + (1 | dataset), 
+  data = auc_df_subset,
+  weights = auc_df_subset$weights
+)
+
+summary(auc_model)
+
+emm_auc_approach <- emmeans(auc_model, specs = c("Approach"))
+emm_auc_model <- emmeans(auc_model, specs = c("model"))
+
+pairs_auc_approach <- pairs(emm_auc_approach)
+pairs_auc_model <- pairs(emm_auc_model)
+
+data.frame(pairs_auc_approach) %>%
+  select(Contrast = contrast, `Difference estimate` = estimate, SE, `p-value` = p.value) %>%
+  kable(digits = 3) %>%
+  kable_styling()
+
+data.frame(pairs_auc_model) %>%
+  mutate(p.value = format.pval(p.value, digits = 1, eps = 1e-4), scientific=F) %>%
+  select(Contrast = contrast, `Difference estimate` = estimate, SE, 
+         `p-value` = p.value) %>%
+  kable(digits = 4) %>%
+  kable_styling()
+```
+
+### Post-deferral AUC
+
+```{r}
+auc_model <- lmer(
+  auc_cve ~ Approach + model + (1 | dataset:seed) + (1 | dataset), 
+  data = auc_df_subset,
+  weights = auc_df_subset$weights
+)
+
+summary(auc_model)
+
+emm_auc_approach <- emmeans(auc_model, specs = c("Approach"))
+emm_auc_model <- emmeans(auc_model, specs = c("model"))
+
+pairs_auc_approach <- pairs(emm_auc_approach)
+pairs_auc_model <- pairs(emm_auc_model)
+
+data.frame(pairs_auc_approach) %>%
+  select(Contrast = contrast, `Difference estimate` = estimate, SE, `p-value` = p.value) %>%
+  kable(digits = 3) %>%
+  kable_styling()
+
+data.frame(pairs_auc_model) %>%
+  mutate(p.value = format.pval(p.value, digits = 1, eps = 1e-4), scientific=F) %>%
+  select(Contrast = contrast, `Difference estimate` = estimate, SE, 
+         `p-value` = p.value) %>%
+  kable(digits = 4) %>%
+  kable_styling()
+```
+
+### Performance improvements
+
+```{r}
+auc_df_subset <- filter(auc_df, Calibration, Approach != "Posterior sampling") %>%
+  mutate(
+    se_total_ve = sqrt(auc_se_baseline ^ 2 + auc_se_ve ^ 2),
+    se_total_cve = sqrt(auc_se_baseline ^ 2 + auc_se_cve ^ 2),
+    weights_ve = 1 / se_total_ve ^ 2,
+    weights_cve = 1 / se_total_cve ^ 2
+  )
+
+cve_model <- lmer(
+  diff_cve ~ Approach + model + (1 | dataset:seed) + (1 | dataset), 
+  data = auc_df_subset,
+  weights = auc_df_subset$weights_cve
+)
+
+summary(cve_model)
+
+emm_cve_approach <- emmeans(cve_model, specs = c("Approach"))
+emm_cve_model <- emmeans(cve_model, specs = c("model"))
+
+pairs_cve_approach <- pairs(emm_cve_approach)
+pairs_cve_model <- pairs(emm_cve_model)
+
+data.frame(pairs_cve_approach) %>%
+  select(Contrast = contrast, `Difference estimate` = estimate, SE, `p-value` = p.value) %>%
+  kable(digits = 3) %>%
+  kable_styling()
+
+data.frame(pairs_cve_model) %>%
+  mutate(p.value = format.pval(p.value, digits = 1, eps = 1e-4), scientific=F) %>%
+  select(Contrast = contrast, `Difference estimate` = estimate, SE, 
+         `p-value` = p.value) %>%
+  kable(digits = 4) %>%
+  kable_styling()
+```
