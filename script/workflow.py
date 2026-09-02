@@ -165,7 +165,11 @@ def main():
         # ii) Split train/test for ALL data consistently using the specified random seed
         logger.info("Splitting data into train and test sets consistently")
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=TEST_PROP, random_state=args.random_seed
+            X,
+            y,
+            test_size=TEST_PROP,
+            random_state=args.random_seed,
+            stratify=y,
         )
 
         for method in args.methods:
