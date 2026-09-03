@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import os
 import joblib
+import time
 
 from sklearn.model_selection import train_test_split
 from uncertainty_quantification.pipeline import get_pipeline
@@ -49,7 +50,7 @@ def main():
     parser.add_argument(
         "--n-features",
         type=int,
-        default=10,
+        default=20,
         help="Number of features to select",
     )
     parser.add_argument(
@@ -130,13 +131,6 @@ def main():
             X = df.iloc[:, :-1].values
             y = df.iloc[:, -1].values
 
-            # Save the dataset used for this run
-            dataset_path = os.path.join(
-                args.output_dir, f"{dataset_name}_data.csv"
-            )
-            df.to_csv(dataset_path, index=False)
-            logger.info(f"Saved dataset to {dataset_path}")
-
         except Exception as e:
             logger.error(
                 f"Failed to load dataset '{dataset_name}': {e}. Using synthetic data fallback."
@@ -164,17 +158,19 @@ def main():
 
         # ii) Split train/test for ALL data consistently using the specified random seed
         logger.info("Splitting data into train and test sets consistently")
-        X_train, X_test, y_train, y_test = train_test_split(
-            X,
-            y,
-            test_size=TEST_PROP,
-            random_state=args.random_seed,
-            stratify=y,
+        X_train, X_test, y_train, y_test, idx_train, idx_test = (
+            train_test_split(
+                X,
+                y,
+                np.arange(0, X.shape[0]),
+                test_size=TEST_PROP,
+                random_state=args.random_seed,
+                stratify=y,
+            )
         )
 
         for method in args.methods:
             logger.info(f"--- Fitting model: {method} ---")
-
             # Constrain unsupported argument combinations to avoid crashes
             if args.posterior_sampling and method != "catboost":
                 logger.warning(
@@ -189,6 +185,7 @@ def main():
                 )
                 vec = None
 
+            start_time = time.time()
             pipeline = get_pipeline(
                 task=args.task,
                 method=method,
@@ -205,6 +202,7 @@ def main():
             )
 
             pipeline.fit(X_train, y_train)
+            end_time = time.time()
 
             output = {}
 
@@ -233,8 +231,10 @@ def main():
             output["preds"] = preds
             output["y_test"] = y_test
             output["proba_preds"] = proba_preds
-
-            joblib.dump(output, model_path)
+            output["idx_test"] = idx_test
+            output["idx_train"] = idx_train
+            output["time_elapsed"] = end_time - start_time
+            joblib.dump(output, model_path, compress=9)
 
 
 if __name__ == "__main__":
