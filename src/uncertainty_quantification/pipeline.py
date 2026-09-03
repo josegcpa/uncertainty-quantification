@@ -162,9 +162,7 @@ class CustomPipeline:
         elif self.method == "xgboost":
             params = {"random_state": self.seed, **hyperparams}
             if self.task == "classification":
-                return XGBClassifier(
-                    eval_metric="logloss", **params
-                )
+                return XGBClassifier(eval_metric="logloss", **params)
             return XGBRegressor(**params)
 
         elif self.method == "lightgbm":
@@ -200,11 +198,7 @@ class CustomPipeline:
 
         def objective(trial):
             params = {}
-            n_features = trial.suggest_int(
-                "n_features",
-                2,
-                min(20, X.shape[1] if hasattr(X, "shape") else 20),
-            )
+            n_features = self.n_features
 
             if self.method == "rf":
                 params["n_estimators"] = trial.suggest_int(
@@ -252,9 +246,7 @@ class CustomPipeline:
         study.optimize(objective, n_trials=self.n_trials, n_jobs=self.n_jobs)
 
         best_params = study.best_params
-        best_n_features = best_params.pop("n_features")
 
-        self.n_features = best_n_features
         # Replace base estimator with optimized hyperparams, but wrapped in
         # whatever decorators (cv_ensemble, calibration) were requested.
         base_estimator = self._get_estimator(**best_params)
