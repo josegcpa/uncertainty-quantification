@@ -35,9 +35,8 @@ class DataCatalog:
     def list_datasets(self) -> List[str]:
         if not self.metadata:
             self.fetch_metadata()
-        # The metadata is typically a list of dicts, but might be a dict. Handle safely.
         if isinstance(self.metadata, dict):
-            return list(self.metadata.keys())
+            return sorted(list(self.metadata.keys()))
         elif isinstance(self.metadata, list):
             datasets = []
             for item in self.metadata:
@@ -45,7 +44,7 @@ class DataCatalog:
                     datasets.append(item["dataset"])
                 elif "name" in item:
                     datasets.append(item["name"])
-            return datasets
+            return sorted(datasets)
         return []
 
 
