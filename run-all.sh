@@ -35,7 +35,7 @@ do
         if [ ! -f "$DIR/.done" ]
         then
             uv run script/workflow.py \
-                --methods xgboost lightgbm rf \
+                --methods xgboost lightgbm \
                 --random-seed $seed \
                 --output-dir $DIR $SAME $CALIBRATION && touch $DIR/.done
         fi
