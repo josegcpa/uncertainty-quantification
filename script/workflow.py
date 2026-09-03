@@ -132,29 +132,9 @@ def main():
             y = df.iloc[:, -1].values
 
         except Exception as e:
-            logger.error(
+            raise ValueError(
                 f"Failed to load dataset '{dataset_name}': {e}. Using synthetic data fallback."
             )
-            if args.task == "classification":
-                from sklearn.datasets import make_classification
-
-                X, y = make_classification(
-                    n_samples=500, n_features=20, random_state=args.random_seed
-                )
-            else:
-                from sklearn.datasets import make_regression
-
-                X, y = make_regression(
-                    n_samples=500, n_features=20, random_state=args.random_seed
-                )
-
-            # Save synthetic data
-            df = pd.DataFrame(X)
-            df["target"] = y
-            dataset_path = os.path.join(
-                args.output_dir, f"{dataset_name}_synthetic_data.csv"
-            )
-            df.to_csv(dataset_path, index=False)
 
         # ii) Split train/test for ALL data consistently using the specified random seed
         logger.info("Splitting data into train and test sets consistently")
