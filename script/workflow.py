@@ -170,6 +170,15 @@ def main():
         )
 
         for method in args.methods:
+            model_filename = (
+                f"{dataset_name}_{method}_seed{args.random_seed}.joblib"
+            )
+            model_path = os.path.join(args.output_dir, model_filename)
+            if os.path.exists(model_path):
+                logger.warning(
+                    "Model %s already exists, skipping...", model_path
+                )
+                continue
             logger.info(f"--- Fitting model: {method} ---")
             # Constrain unsupported argument combinations to avoid crashes
             if args.posterior_sampling and method != "catboost":
@@ -206,10 +215,6 @@ def main():
 
             output = {}
 
-            model_filename = (
-                f"{dataset_name}_{method}_seed{args.random_seed}.joblib"
-            )
-            model_path = os.path.join(args.output_dir, model_filename)
             if args.save_model:
                 output["pipeline"] = pipeline
 
