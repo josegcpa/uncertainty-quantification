@@ -71,7 +71,7 @@ do
             if [ ! -f "$DIR/.done" ]
             then
                 uv run script/workflow.py \
-                    --methods xgboost lightgbm rf \
+                    --methods xgboost lightgbm \
                     --cv-ensemble \
                     --cv-ensemble-splits $cv_ensemble_splits \
                     --random-seed $seed \
