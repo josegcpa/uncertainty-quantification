@@ -8,8 +8,9 @@ from .logger import get_logger
 
 logger = get_logger("uncertainty_quantification")
 
-METADATA_URL = "https://raw.githubusercontent.com/aydindemircioglu/radMLBench/main/radMLBench/metadata.yaml"
-DATASETS_BASE_URL = "https://raw.githubusercontent.com/aydindemircioglu/radMLBench/main/datasets/"
+RADMLBENCH_URL = "https://raw.githubusercontent.com/aydindemircioglu/radMLBench"
+METADATA_URL = f"{RADMLBENCH_URL}/main/radMLBench/metadata.yaml"
+DATASETS_BASE_URL = f"{RADMLBENCH_URL}/main/datasets/"
 DOWNLOAD_DIR = "data/raw"
 
 
