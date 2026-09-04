@@ -1,19 +1,22 @@
 import argparse
 import numpy as np
-import pandas as pd
 import os
 import joblib
 import time
 
-from sklearn.model_selection import train_test_split
 from uncertainty_quantification.pipeline import get_pipeline
-from uncertainty_quantification.data import load_dataset, DataCatalog
+from uncertainty_quantification.data import (
+    get_data_split,
+    DataCatalog,
+)
 from uncertainty_quantification.logger import get_logger
 
 logger = get_logger("workflow")
 
 DATASETS = DataCatalog().list_datasets()
-TEST_PROP = 0.2
+FOLDS_DIR = "data/splits"
+
+os.makedirs(FOLDS_DIR, exist_ok=True)
 
 
 def main():
@@ -50,7 +53,7 @@ def main():
     parser.add_argument(
         "--n-features",
         type=int,
-        default=20,
+        default=50,
         help="Number of features to select",
     )
     parser.add_argument(
@@ -96,7 +99,13 @@ def main():
         help="Number of jobs for parallel processing",
     )
     parser.add_argument(
-        "--save_model",
+        "--test-prop",
+        type=float,
+        default=0.2,
+        help="Testing proportion",
+    )
+    parser.add_argument(
+        "--save-model",
         action="store_true",
         help="Save trained models",
     )
@@ -124,29 +133,10 @@ def main():
 
     for dataset_name in datasets:
         logger.info(f"--- Processing dataset: {dataset_name} ---")
-        try:
-            df = load_dataset(dataset_name)
-            if "ID" in df.columns:
-                df = df.drop(columns=["ID"])
-            X = df.iloc[:, :-1].values
-            y = df.iloc[:, -1].values
-
-        except Exception as e:
-            raise ValueError(
-                f"Failed to load dataset '{dataset_name}': {e}. Using synthetic data fallback."
-            )
-
         # ii) Split train/test for ALL data consistently using the specified random seed
         logger.info("Splitting data into train and test sets consistently")
-        X_train, X_test, y_train, y_test, idx_train, idx_test = (
-            train_test_split(
-                X,
-                y,
-                np.arange(0, X.shape[0]),
-                test_size=TEST_PROP,
-                random_state=args.random_seed,
-                stratify=y,
-            )
+        X_train, X_test, y_train, y_test, idx_train, idx_test = get_data_split(
+            dataset_name, args.random_seed
         )
 
         for method in args.methods:

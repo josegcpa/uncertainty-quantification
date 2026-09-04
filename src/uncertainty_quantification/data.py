@@ -1,9 +1,13 @@
 import os
 import requests
 import yaml
+import joblib
+import numpy as np
 import pandas as pd
 from pathlib import Path
 from typing import Dict, Any, List
+from sklearn.model_selection import train_test_split
+
 from .logger import get_logger
 
 logger = get_logger("uncertainty_quantification")
@@ -12,6 +16,7 @@ RADMLBENCH_URL = "https://raw.githubusercontent.com/aydindemircioglu/radMLBench"
 METADATA_URL = f"{RADMLBENCH_URL}/main/radMLBench/metadata.yaml"
 DATASETS_BASE_URL = f"{RADMLBENCH_URL}/main/datasets/"
 DOWNLOAD_DIR = "data/raw"
+FOLDS_DIR = "data/splits"
 
 
 class DataCatalog:
@@ -77,3 +82,42 @@ def load_dataset(
     except Exception as e:
         logger.error(f"Failed to load dataset {dataset_name}: {e}")
         raise
+
+
+def get_data_split(dataset_name: str, random_seed: int, test_prop: float = 0.2):
+    splits_path = os.path.join(
+        FOLDS_DIR,
+        f"{dataset_name}.{random_seed}.joblib",
+    )
+    if os.path.exists(splits_path):
+        logger.info("Found split in %s", splits_path)
+        X_train, X_test, y_train, y_test, idx_train, idx_test = joblib.load(
+            splits_path
+        )
+    else:
+        try:
+            df = load_dataset(dataset_name)
+            if "ID" in df.columns:
+                df = df.drop(columns=["ID"])
+            X = df.iloc[:, :-1].values
+            y = df.iloc[:, -1].values
+
+        except Exception as e:
+            raise ValueError(f"Failed to load dataset '{dataset_name}': {e}.")
+
+        X_train, X_test, y_train, y_test, idx_train, idx_test = (
+            train_test_split(
+                X,
+                y,
+                np.arange(0, X.shape[0]),
+                test_size=test_prop,
+                random_state=random_seed,
+                stratify=y,
+            )
+        )
+        joblib.dump(
+            (X_train, X_test, y_train, y_test, idx_train, idx_test),
+            splits_path,
+        )
+        logger.info("Saved split to %s", splits_path)
+    return X_train, X_test, y_train, y_test, idx_train, idx_test

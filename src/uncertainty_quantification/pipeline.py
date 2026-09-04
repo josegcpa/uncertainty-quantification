@@ -150,6 +150,7 @@ class CustomPipeline:
         if self.method == "catboost":
             kwargs = dict(hyperparams)
             kwargs["random_seed"] = self.seed
+            kwargs["thread_count"] = 1
             if self.posterior_sampling:
                 kwargs["posterior_sampling"] = True
                 kwargs["iterations"] = 100
@@ -160,21 +161,31 @@ class CustomPipeline:
             return CatBoostRegressor(verbose=False, **kwargs)
 
         elif self.method == "xgboost":
-            params = {"random_state": self.seed, **hyperparams}
+            params = {
+                "n_jobs": 1,
+                "random_state": self.seed,
+                **hyperparams,
+            }
             if self.task == "classification":
                 return XGBClassifier(eval_metric="logloss", **params)
             return XGBRegressor(**params)
 
         elif self.method == "lightgbm":
-            params = {"verbose": -1, "random_state": self.seed, **hyperparams}
+            params = {
+                "verbose": -1,
+                "n_jobs": 1,
+                "random_state": self.seed,
+                **hyperparams,
+            }
             if self.task == "classification":
                 return LGBMClassifier(**params)
             return LGBMRegressor(**params)
 
         elif self.method == "rf":
             params = {
-                "random_state": self.seed,
                 "n_estimators": 100,
+                "n_jobs": 1,
+                "random_state": self.seed,
                 **hyperparams,
             }
             if self.task == "classification":

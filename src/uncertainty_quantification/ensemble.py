@@ -1,5 +1,6 @@
 from typing import List, Literal
 import numpy as np
+from scipy.stats import mode
 from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin, clone
 from sklearn.model_selection import KFold, StratifiedKFold
 
@@ -67,9 +68,7 @@ class CVEnsembleEstimator(BaseEstimator):
                 raise ValueError(
                     "Majority voting is not supported for regression tasks."
                 )
-            # Simple majority voting
-            from scipy.stats import mode
-
+            # majority voting
             modes, _ = mode(all_preds, axis=0, keepdims=False)
             return modes
         elif output_format == "mean":
