@@ -62,7 +62,7 @@ class CustomPipeline:
         n_features: int = 10,
         optimize_hyperparameters: bool = False,
         virtual_ensembles_count: Optional[int] = None,
-        ensemble_output_format: str = "raw",
+        ensemble_output_format: Optional[str] = None,
         n_trials: int = 50,
         n_jobs: int = 1,
         seed: int = 42,
@@ -104,6 +104,15 @@ class CustomPipeline:
 
         base_estimator = self._get_estimator()
 
+        if self.calibration and self.task == "classification":
+            logger.info("Applying isotonic calibration to each fold model")
+            cv = StratifiedKFold(
+                n_splits=3, shuffle=True, random_state=self.seed
+            )
+            base_estimator = CustomCalibratedClassifierCV(
+                base_estimator, method="isotonic", cv=cv
+            )
+
         if self.cv_ensemble:
             logger.info(
                 f"Using CV ensemble with {self.cv_ensemble_splits} splits"
@@ -124,27 +133,22 @@ class CustomPipeline:
                     random_state=self.seed,
                 )
 
-        if self.calibration and self.task == "classification":
-            cv = StratifiedKFold(
-                n_splits=3, shuffle=True, random_state=self.seed
-            )
-            base_estimator = CustomCalibratedClassifierCV(
-                base_estimator, method="isotonic", cv=cv
-            )
-
-        if self.feature_selection_method == "kbest":
-            score_func = (
-                f_classif if self.task == "classification" else f_regression
-            )
-            selector = SelectKBest(score_func=score_func, k=self.n_features)
-        else:
-            raise ValueError(
-                f"Unknown feature selection method: {self.feature_selection_method}"
-            )
+        selector = self._get_selector()
 
         steps = [("feature_selection", selector), ("estimator", base_estimator)]
 
         self.pipeline = Pipeline(steps)
+
+    def _get_selector(self, n_features: Optional[int] = None):
+        if self.feature_selection_method == "kbest":
+            k = n_features if n_features is not None else self.n_features
+            score_func = (
+                f_classif if self.task == "classification" else f_regression
+            )
+            return SelectKBest(score_func=score_func, k=k)
+        raise ValueError(
+            f"Unknown feature selection method: {self.feature_selection_method}"
+        )
 
     def _get_estimator(self, **hyperparams):
         if self.method == "catboost":
@@ -153,8 +157,8 @@ class CustomPipeline:
             kwargs["thread_count"] = 1
             if self.posterior_sampling:
                 kwargs["posterior_sampling"] = True
-                kwargs["iterations"] = 100
-                kwargs["l2_leaf_reg"] = 1.0
+                kwargs.setdefault("iterations", 100)
+                kwargs.setdefault("l2_leaf_reg", 1.0)
 
             if self.task == "classification":
                 return CatBoostClassifier(verbose=False, **kwargs)
@@ -211,6 +215,11 @@ class CustomPipeline:
             params = {}
             n_features = self.n_features
 
+            if self.feature_selection_method == "kbest":
+                n_features = trial.suggest_int(
+                    "n_features", 10, self.n_features
+                )
+
             if self.method == "rf":
                 params["n_estimators"] = trial.suggest_int(
                     "n_estimators", 50, 200
@@ -224,15 +233,18 @@ class CustomPipeline:
                     "learning_rate", 1e-3, 0.5, log=True
                 )
             elif self.method == "catboost":
-                params["iterations"] = trial.suggest_int("iterations", 50, 200)
+                params["iterations"] = trial.suggest_int(
+                    "iterations", 50, 200
+                )
+                if self.posterior_sampling:
+                    params["l2_leaf_reg"] = trial.suggest_float(
+                        "l2_leaf_reg", 1e-3, 10.0, log=True
+                    )
                 params["learning_rate"] = trial.suggest_float(
                     "learning_rate", 1e-3, 0.5, log=True
                 )
 
-            score_func = (
-                f_classif if self.task == "classification" else f_regression
-            )
-            selector = SelectKBest(score_func=score_func, k=n_features)
+            selector = self._get_selector(n_features=n_features)
 
             estimator = self._get_estimator(**params)
 
@@ -257,10 +269,19 @@ class CustomPipeline:
         study.optimize(objective, n_trials=self.n_trials, n_jobs=self.n_jobs)
 
         best_params = study.best_params
+        best_n_features = best_params.pop("n_features", self.n_features)
 
         # Replace base estimator with optimized hyperparams, but wrapped in
         # whatever decorators (cv_ensemble, calibration) were requested.
         base_estimator = self._get_estimator(**best_params)
+
+        if self.calibration and self.task == "classification":
+            cv = StratifiedKFold(
+                n_splits=3, shuffle=True, random_state=self.seed
+            )
+            base_estimator = CustomCalibratedClassifierCV(
+                base_estimator, method="isotonic", cv=cv
+            )
 
         if self.cv_ensemble:
             if self.task == "classification":
@@ -279,18 +300,7 @@ class CustomPipeline:
                     random_state=self.seed,
                 )
 
-        if self.calibration and self.task == "classification":
-            cv = StratifiedKFold(
-                n_splits=3, shuffle=True, random_state=self.seed
-            )
-            base_estimator = CustomCalibratedClassifierCV(
-                base_estimator, method="isotonic", cv=cv
-            )
-
-        score_func = (
-            f_classif if self.task == "classification" else f_regression
-        )
-        selector = SelectKBest(score_func=score_func, k=self.n_features)
+        selector = self._get_selector(n_features=best_n_features)
 
         self.pipeline = Pipeline(
             [("feature_selection", selector), ("estimator", base_estimator)]
@@ -324,17 +334,20 @@ class CustomPipeline:
         return self.pipeline.predict_proba(X)
 
     def predict_proba_raw(self, X, *args, **kwargs):
-        logger.info("Predicting probabilities")
+        logger.info("Predicting raw probabilities")
 
-        if self.cv_ensemble:
-            X_reduced = self.pipeline.named_steps[
-                "feature_selection"
-            ].transform(X)
-            return self.pipeline.named_steps["estimator"].predict_proba_raw(
-                X_reduced, *args, **kwargs
+        if not self.cv_ensemble:
+            raise ValueError(
+                "predict_proba_raw requires cv_ensemble=True; "
+                "use predict_proba for standard probability predictions"
             )
 
-        return self.pipeline.predict_proba(X)
+        X_reduced = self.pipeline.named_steps[
+            "feature_selection"
+        ].transform(X)
+        return self.pipeline.named_steps["estimator"].predict_proba_raw(
+            X_reduced, *args, **kwargs
+        )
 
     def virtual_ensembles_predict(self, X):
         """Wrapper around feature processing and calling virtual_ensembles_count for CatBoost"""
