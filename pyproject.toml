@@ -13,6 +13,7 @@ dependencies = [
     "lightgbm",
     "optuna",
     "pandas",
+    "pyarrow>=25.0.1",
     "pytest",
     "pyyaml",
     "requests",
