@@ -33,7 +33,8 @@ if __name__ == "__main__":
         proba_preds = results.get("proba_preds", None)[..., 1]
         virtual_preds = results.get("virtual_preds", None)
 
-        if len(proba_preds.shape) > 1:
+        if "cvensemble" in approach:
+            proba_preds = results["proba_preds_raw"][..., 1]
             proba_var = np.var(proba_preds, axis=1)
             proba_min = np.min(proba_preds, axis=1)
             proba_max = np.max(proba_preds, axis=1)
