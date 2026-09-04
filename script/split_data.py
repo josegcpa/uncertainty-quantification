@@ -32,7 +32,7 @@ if __name__ == "__main__":
         help="Random seed for reproducibility",
     )
     parser.add_argument(
-        "--test_prop",
+        "--test-prop",
         type=float,
         default=0.2,
         help="Testing proportion",
