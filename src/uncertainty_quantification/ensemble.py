@@ -69,7 +69,7 @@ class CVEnsembleEstimator(BaseEstimator):
                     "Majority voting is not supported for regression tasks."
                 )
             # majority voting
-            modes, _ = mode(all_preds, axis=0, keepdims=False)
+            modes, _ = mode(all_preds.astype(int), axis=0, keepdims=False)
             return modes
         elif output_format == "mean":
             return np.mean(all_preds, axis=0)
