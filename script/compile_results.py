@@ -25,6 +25,9 @@ if __name__ == "__main__":
 
         results = joblib.load(result)
 
+        idx_test = results["idx_test"]
+        time_elapsed = results["time_elapsed"]
+
         preds = results.get("preds", None)
         y_test = results.get("y_test", None)
         proba_preds = results.get("proba_preds", None)[..., 1]
@@ -63,6 +66,7 @@ if __name__ == "__main__":
                 "virtual_var": virtual_var,
                 "virtual_min": virtual_min,
                 "virtual_max": virtual_max,
+                "idx_test": idx_test,
             }
         )
         data["approach"] = approach
@@ -71,9 +75,11 @@ if __name__ == "__main__":
         data["seed"] = seed
         data["calibration"] = calibration
         data["nfolds"] = nfolds
+        data["time_elapsed"] = time_elapsed
 
         all_df.append(data)
 
     all_df = pd.concat(all_df)
     Path("data").mkdir(exist_ok=True)
     all_df.to_csv("data/results.csv", index=False)
+    all_df.to_parquet("data/results.parquet", index=False)
