@@ -75,16 +75,20 @@ def load_dataset(
     path = f"{DOWNLOAD_DIR}/{dataset_name}.gz"
     url = f"{DATASETS_BASE_URL}/{dataset_name}.gz"
     download_if_unavailable(path, url)
-    url = os.path.join(DOWNLOAD_DIR, f"{dataset_name}.gz")
     try:
-        df = pd.read_csv(url)
+        df = pd.read_csv(path)
         return df
     except Exception as e:
         logger.error(f"Failed to load dataset {dataset_name}: {e}")
         raise
 
 
-def get_data_split(dataset_name: str, random_seed: int, test_prop: float = 0.2):
+def get_data_split(
+    dataset_name: str,
+    random_seed: int,
+    test_prop: float = 0.2,
+    task: str = "classification",
+):
     splits_path = os.path.join(
         FOLDS_DIR,
         f"{dataset_name}.{random_seed}.joblib",
@@ -97,14 +101,18 @@ def get_data_split(dataset_name: str, random_seed: int, test_prop: float = 0.2):
     else:
         try:
             df = load_dataset(dataset_name)
-            if "ID" in df.columns:
-                df = df.drop(columns=["ID"])
+            id_cols = [
+                c for c in df.columns if c.lower() in ("id", "unnamed: 0")
+            ]
+            if id_cols:
+                df = df.drop(columns=id_cols)
             X = df.iloc[:, :-1].values
             y = df.iloc[:, -1].values
 
         except Exception as e:
             raise ValueError(f"Failed to load dataset '{dataset_name}': {e}.")
 
+        stratify = y if task == "classification" else None
         X_train, X_test, y_train, y_test, idx_train, idx_test = (
             train_test_split(
                 X,
@@ -112,7 +120,7 @@ def get_data_split(dataset_name: str, random_seed: int, test_prop: float = 0.2):
                 np.arange(0, X.shape[0]),
                 test_size=test_prop,
                 random_state=random_seed,
-                stratify=y,
+                stratify=stratify,
             )
         )
         joblib.dump(
