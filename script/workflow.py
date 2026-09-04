@@ -8,18 +8,17 @@ from uncertainty_quantification.pipeline import get_pipeline
 from uncertainty_quantification.data import (
     get_data_split,
     DataCatalog,
+    FOLDS_DIR,
 )
 from uncertainty_quantification.logger import get_logger
 
 logger = get_logger("workflow")
 
-DATASETS = DataCatalog().list_datasets()
-FOLDS_DIR = "data/splits"
-
-os.makedirs(FOLDS_DIR, exist_ok=True)
-
 
 def main():
+    catalog = DataCatalog()
+    datasets = catalog.list_datasets()
+
     parser = argparse.ArgumentParser(
         description="Uncertainty Quantification Workflow CLI"
     )
@@ -27,7 +26,7 @@ def main():
         "--datasets",
         nargs="+",
         required=True,
-        choices=["all", *DATASETS],
+        choices=["all", *datasets],
         help="List of dataset names (e.g. dataset1 dataset2)",
     )
     parser.add_argument(
@@ -89,7 +88,7 @@ def main():
     parser.add_argument(
         "--virtual-ensembles-count",
         type=int,
-        default=10,
+        default=None,
         help="Number of virtual ensembles (CatBoost only)",
     )
     parser.add_argument(
@@ -119,6 +118,7 @@ def main():
     args = parser.parse_args()
 
     # Create output directory
+    os.makedirs(FOLDS_DIR, exist_ok=True)
     os.makedirs(args.output_dir, exist_ok=True)
     logger.info(f"Results will be saved to {args.output_dir}/")
 
@@ -127,16 +127,16 @@ def main():
     logger.info(f"Random seed set to {args.random_seed}")
 
     if "all" in args.datasets:
-        datasets = DATASETS
+        selected_datasets = datasets
     else:
-        datasets = args.datasets
+        selected_datasets = args.datasets
 
-    for dataset_name in datasets:
+    for dataset_name in selected_datasets:
         logger.info(f"--- Processing dataset: {dataset_name} ---")
         # ii) Split train/test for ALL data consistently using the specified random seed
         logger.info("Splitting data into train and test sets consistently")
         X_train, X_test, y_train, y_test, idx_train, idx_test = get_data_split(
-            dataset_name, args.random_seed
+            dataset_name, args.random_seed, task=args.task
         )
 
         for method in args.methods:
@@ -190,9 +190,15 @@ def main():
 
             logger.info("Calculating raw predictions")
             preds = pipeline.predict(X_test)
-            proba_preds = pipeline.predict_proba_raw(X_test)
 
-            if vec and method == "catboost":
+            if args.task == "classification":
+                output["proba_preds"] = pipeline.predict_proba(X_test)
+                if args.cv_ensemble:
+                    output["proba_preds_raw"] = pipeline.predict_proba_raw(
+                        X_test
+                    )
+
+            if vec is not None and method == "catboost":
                 virtual_preds = pipeline.virtual_ensembles_predict(X_test)
                 logger.info(
                     f"Virtual ensemble predictions shape: {virtual_preds.shape}"
@@ -205,7 +211,6 @@ def main():
             )
             output["preds"] = preds
             output["y_test"] = y_test
-            output["proba_preds"] = proba_preds
             output["idx_test"] = idx_test
             output["idx_train"] = idx_train
             output["time_elapsed"] = end_time - start_time
