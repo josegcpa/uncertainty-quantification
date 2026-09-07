@@ -64,6 +64,7 @@ if __name__ == "__main__":
                 "proba_var": proba_var,
                 "proba_min": proba_min,
                 "proba_max": proba_max,
+                "virtual_preds": virtual_preds,
                 "virtual_var": virtual_var,
                 "virtual_min": virtual_min,
                 "virtual_max": virtual_max,
