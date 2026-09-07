@@ -92,6 +92,17 @@ class CustomPipeline:
                 "virtual_ensembles_count is only available for method='catboost'"
             )
 
+        if (
+            self.virtual_ensembles_count is not None
+            and not self.posterior_sampling
+        ):
+            logger.warning(
+                "virtual_ensembles_count requested but posterior_sampling is "
+                "disabled; virtual ensembles are degenerate without posterior "
+                "sampling, enabling posterior_sampling"
+            )
+            self.posterior_sampling = True
+
         self._build_pipeline()
 
     def _build_pipeline(self):
@@ -233,9 +244,7 @@ class CustomPipeline:
                     "learning_rate", 1e-3, 0.5, log=True
                 )
             elif self.method == "catboost":
-                params["iterations"] = trial.suggest_int(
-                    "iterations", 50, 200
-                )
+                params["iterations"] = trial.suggest_int("iterations", 50, 200)
                 if self.posterior_sampling:
                     params["l2_leaf_reg"] = trial.suggest_float(
                         "l2_leaf_reg", 1e-3, 10.0, log=True
@@ -342,9 +351,7 @@ class CustomPipeline:
                 "use predict_proba for standard probability predictions"
             )
 
-        X_reduced = self.pipeline.named_steps[
-            "feature_selection"
-        ].transform(X)
+        X_reduced = self.pipeline.named_steps["feature_selection"].transform(X)
         return self.pipeline.named_steps["estimator"].predict_proba_raw(
             X_reduced, *args, **kwargs
         )
