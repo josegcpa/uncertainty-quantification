@@ -18,6 +18,9 @@ from .logger import get_logger
 
 logger = get_logger("uncertainty_quantification")
 
+MIN_TREES = 100
+MAX_TREES = 200
+
 
 class CustomCalibratedClassifierCV(CalibratedClassifierCV):
     def predict_with_method(self, X, method_name: str, *args, **kwargs):
@@ -233,21 +236,23 @@ class CustomPipeline:
 
             if self.method == "rf":
                 params["n_estimators"] = trial.suggest_int(
-                    "n_estimators", 50, 200
+                    "n_estimators", MIN_TREES, MAX_TREES
                 )
                 params["max_depth"] = trial.suggest_int("max_depth", 5, 20)
             elif self.method in ["lightgbm", "xgboost"]:
                 params["n_estimators"] = trial.suggest_int(
-                    "n_estimators", 50, 200
+                    "n_estimators", MIN_TREES, MAX_TREES
                 )
                 params["learning_rate"] = trial.suggest_float(
                     "learning_rate", 1e-3, 0.5, log=True
                 )
             elif self.method == "catboost":
-                params["iterations"] = trial.suggest_int("iterations", 50, 200)
+                params["iterations"] = trial.suggest_int(
+                    "iterations", MIN_TREES, MAX_TREES
+                )
                 if self.posterior_sampling:
                     params["l2_leaf_reg"] = trial.suggest_float(
-                        "l2_leaf_reg", 1e-3, 10.0, log=True
+                        "l2_leaf_reg", 0.1, 1.0, log=True
                     )
                 params["learning_rate"] = trial.suggest_float(
                     "learning_rate", 1e-3, 0.5, log=True
