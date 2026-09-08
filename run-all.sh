@@ -4,7 +4,6 @@ SEEDS=(42 43 44 45 46 123 1234 12345 4242 4243)
 EXPERIMENTS=(
     "baseline" 
     "benchmark" 
-    "posteriorsampling" 
     "cv_baseline_3"
     "cv_baseline_5"
     "cv_baseline_10" 
@@ -43,6 +42,7 @@ run_experiment() {
         then
             uv run script/workflow.py \
                 --methods catboost \
+                --posterior-sampling \
                 --random-seed $seed \
                 --output-dir $DIR $SAME $CALIBRATION && touch $DIR/.done
         fi
@@ -59,19 +59,7 @@ run_experiment() {
                 --output-dir $DIR $SAME $CALIBRATION && touch $DIR/.done
         fi
 
-    # posterior sampling
-    elif [ "$experiment" == "posteriorsampling" ]
-    then
-        DIR=$RESULTS_DIR/posteriorsampling$CALIBRATION_DIR.NA.$seed
-        if [ ! -f "$DIR/.done" ]
-        then
-            uv run script/workflow.py \
-                --methods catboost \
-                --posterior-sampling \
-                --random-seed $seed \
-                --output-dir $DIR $SAME $CALIBRATION && touch $DIR/.done
-        fi
-
+    # cv
     elif [[ "$experiment" == *"cv_baseline"* ]]
     then
         cv_ensemble_splits=$(echo "$experiment" | cut -d _ -f 3)
@@ -80,6 +68,7 @@ run_experiment() {
         then
             uv run script/workflow.py \
                 --methods catboost \
+                --posterior-sampling \
                 --cv-ensemble \
                 --cv-ensemble-splits $cv_ensemble_splits \
                 --random-seed $seed \
