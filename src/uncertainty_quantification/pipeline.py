@@ -12,6 +12,7 @@ from catboost import CatBoostClassifier, CatBoostRegressor
 from xgboost import XGBClassifier, XGBRegressor
 from lightgbm import LGBMClassifier, LGBMRegressor
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.linear_model import LogisticRegression, LinearRegression
 
 from .ensemble import CVEnsembleClassifier, CVEnsembleRegressor
 from .logger import get_logger
@@ -199,6 +200,18 @@ class CustomPipeline:
                 return LGBMClassifier(**params)
             return LGBMRegressor(**params)
 
+        elif self.method == "lr":
+            params = {
+                "l1_ratio": 0.99,
+                "n_jobs": 1,
+                "random_state": self.seed,
+                "max_iter": 200,
+                **hyperparams,
+            }
+            if self.task == "classification":
+                return LogisticRegression(**params)
+            return LinearRegression(**params)
+
         elif self.method == "rf":
             params = {
                 "n_estimators": 100,
@@ -239,6 +252,14 @@ class CustomPipeline:
                     "n_estimators", MIN_TREES, MAX_TREES
                 )
                 params["max_depth"] = trial.suggest_int("max_depth", 5, 20)
+            if self.method == "lr":
+                params["C"] = trial.suggest_float("C", 1e-7, 10.0, log=True)
+                params["l1_ratio"] = trial.suggest_float(
+                    "l1_ratio", 1e-7, 1.0, log=True
+                )
+                params["solver"] = trial.suggest_categorical(
+                    "solver", ("lbfgs", "saga")
+                )
             elif self.method in ["lightgbm", "xgboost"]:
                 params["n_estimators"] = trial.suggest_int(
                     "n_estimators", MIN_TREES, MAX_TREES

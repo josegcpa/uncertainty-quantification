@@ -33,7 +33,7 @@ def main():
         "--methods",
         nargs="+",
         required=True,
-        choices=["catboost", "xgboost", "lightgbm", "rf"],
+        choices=["catboost", "xgboost", "lightgbm", "rf", "lr"],
         help="List of ML methods to train",
     )
     parser.add_argument(
