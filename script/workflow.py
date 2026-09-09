@@ -92,7 +92,13 @@ def main():
         help="Number of virtual ensembles (CatBoost only)",
     )
     parser.add_argument(
-        "--n_jobs",
+        "--n-trials",
+        type=int,
+        default=50,
+        help="Number of Optuna trials to run",
+    )
+    parser.add_argument(
+        "--n-jobs",
         type=int,
         default=1,
         help="Number of jobs for parallel processing",
@@ -176,6 +182,7 @@ def main():
                 n_features=args.n_features,
                 optimize_hyperparameters=args.optimize,
                 virtual_ensembles_count=vec,
+                n_trials=args.n_trials,
                 n_jobs=args.n_jobs,
                 seed=args.random_seed,
             )
