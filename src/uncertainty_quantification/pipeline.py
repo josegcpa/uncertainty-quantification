@@ -203,9 +203,9 @@ class CustomPipeline:
         elif self.method == "lr":
             params = {
                 "l1_ratio": 0.99,
-                "n_jobs": 1,
                 "random_state": self.seed,
-                "max_iter": 200,
+                "max_iter": 10000,
+                "solver": "saga",
                 **hyperparams,
             }
             if self.task == "classification":
@@ -256,9 +256,6 @@ class CustomPipeline:
                 params["C"] = trial.suggest_float("C", 1e-7, 10.0, log=True)
                 params["l1_ratio"] = trial.suggest_float(
                     "l1_ratio", 1e-7, 1.0, log=True
-                )
-                params["solver"] = trial.suggest_categorical(
-                    "solver", ("lbfgs", "saga")
                 )
             elif self.method in ["lightgbm", "xgboost"]:
                 params["n_estimators"] = trial.suggest_int(
