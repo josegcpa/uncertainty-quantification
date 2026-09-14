@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import optuna
 from typing import Literal, Optional
@@ -19,8 +21,9 @@ from .logger import get_logger
 
 logger = get_logger("uncertainty_quantification")
 
-MIN_TREES = 100
-MAX_TREES = 200
+MIN_TREES = os.environ.get("MIN_TREES", 100)
+MAX_TREES = os.environ.get("MAX_TREES", 200)
+N_FOLDS_CALIBRATION = os.environ.get("N_FOLDS_CALIBRATION", 5)
 
 
 class CustomCalibratedClassifierCV(CalibratedClassifierCV):
@@ -122,10 +125,10 @@ class CustomPipeline:
         if self.calibration and self.task == "classification":
             logger.info("Applying isotonic calibration to each fold model")
             cv = StratifiedKFold(
-                n_splits=3, shuffle=True, random_state=self.seed
+                n_splits=5, shuffle=True, random_state=self.seed
             )
             base_estimator = CustomCalibratedClassifierCV(
-                base_estimator, method="isotonic", cv=cv
+                base_estimator, method="sigmoid", cv=cv
             )
 
         if self.cv_ensemble:
@@ -309,7 +312,9 @@ class CustomPipeline:
 
         if self.calibration and self.task == "classification":
             cv = StratifiedKFold(
-                n_splits=3, shuffle=True, random_state=self.seed
+                n_splits=N_FOLDS_CALIBRATION,
+                shuffle=True,
+                random_state=self.seed,
             )
             base_estimator = CustomCalibratedClassifierCV(
                 base_estimator, method="isotonic", cv=cv
